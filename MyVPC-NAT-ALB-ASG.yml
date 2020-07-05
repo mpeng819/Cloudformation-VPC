@@ -1,11 +1,13 @@
 AWSTemplateFormatVersion: 2010-09-09
-# This CloudFormation template deploys a basic VPC, with the following:
-# 2 Public Subnets in 2 AZ
-# 2 Private Subnets in 2 AZ
-# 1 NAT instance in PublicSubnet1
-# 1 public facing Application Load Balancer
-# 1 1 ASG
-# 2 EC2 instance in 2 Private Subnet in the ASG, 1 EC2 each Private Subnet
+# This CloudFormation template deploys a VPC, with the following:
+# 2 x Public Subnets in 2 AZ
+# 2 x Private Subnets in 2 AZ
+# 1 x NAT instance in PublicSubnet1
+# 1 x NAT instance in PublicSubnet2
+# 1 x Public Facing Application Load Balancer
+# 1 x ASG
+# 2 x EC2 instance in 2 Private Subnet in the ASG, 1 EC2 per Private Subnet
+# 1 x S3 Gateway Endpoints, associate Private RT1 and Private RT2
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -71,32 +73,37 @@ Parameters:
 
 
 Mappings:
- #  This is the Amazon Linux 2 AMI.  Adjust these values as needed, they can change a few times per year:
+ #  This is the Amazon Linux 2 AMI.  Please check before the deployment
   AmazonLinuxAMI:
     ap-southeast-1:
       AMI: ami-0615132a0f36d24f4    # Singapore
-    ap-east-1:
-      AMI: ami-49bbfa38    # Hongkong
     ap-northeast-1:
       AMI: ami-0a1c2ec61571737db    # Tokyo
     ap-northeast-2:
       AMI: ami-01af223aa7f274198    # Seoul
 
+  # This is mapping for the instance type. Please check before the deployment
   AmazonLinuxAMIInstanceType:
     ap-southeast-1:
       AMIType: t2.micro    # Singapore
-    ap-east-1:
-      AMIType: t3.micro    # Hongkong
     ap-northeast-1:
       AMIType: t2.micro    # Tokyo
     ap-northeast-2:
       AMIType: t2.micro    # Seoul
 
+  # This is the NAT AMI. Please check before the deployment
+  AmazonNATAMI:
+    ap-southeast-1:
+      AMI: ami-0003ce8d47722ef67    # Singapore
+    ap-northeast-1:
+      AMI: ami-00d29e4cb217ae06b    # Tokyo
+    ap-northeast-2:
+      AMI: ami-02e99970f2f3c8e60    # Seoul
 
 
 
 Resources:
-  # First, a VPC:
+  # Create VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -105,7 +112,8 @@ Resources:
       EnableDnsHostnames: true
       Tags:
       - Key: Name
-        Value:  !Join ['', [!Ref "AWS::StackName", "-VPC" ]]
+        Value:  !Sub ${AWS::StackName}
+
   # Our VPC will need internet access:
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -113,7 +121,6 @@ Resources:
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
-    # Notice how you can't attach an IGW to a VPC unless both are created:
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
@@ -127,7 +134,7 @@ Resources:
       AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list
       Tags:
       - Key: Name
-        Value: !Sub ${AWS::StackName}-Public-A
+        Value: !Sub ${AWS::StackName}-Public-1
 
   PublicSubnetB:
     Type: AWS::EC2::Subnet
@@ -138,7 +145,7 @@ Resources:
       AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list
       Tags:
       - Key: Name
-        Value: !Sub ${AWS::StackName}-Public-B
+        Value: !Sub ${AWS::StackName}-Public-2
 
   PrivateSubnetA:
     Type: AWS::EC2::Subnet
@@ -149,7 +156,7 @@ Resources:
       AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list
       Tags:
       - Key: Name
-        Value: !Sub ${AWS::StackName}-Private-A
+        Value: !Sub ${AWS::StackName}-Private-1
 
   PrivateSubnetB:
     Type: AWS::EC2::Subnet
@@ -160,7 +167,7 @@ Resources:
       AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list
       Tags:
       - Key: Name
-        Value: !Sub ${AWS::StackName}-Private-B
+        Value: !Sub ${AWS::StackName}-Private-2
 
   # Some route tables for our subnets:
   PublicRouteTable:
@@ -169,9 +176,10 @@ Resources:
       VpcId: !Ref VPC
       Tags:
       - Key: Name
-        Value: Public
+        Value: Public-RT
 
-  PublicRoute1:   # Public route table has direct routing to IGW:
+  # Public route table has direct routing to IGW:
+  PublicRoute1:
     Type: AWS::EC2::Route
     DependsOn: AttachGateway
     Properties:
@@ -179,25 +187,40 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  # Here is a private route table:
-  PrivateRouteTable:
+  # Here are the private route tables:
+  PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
       - Key: Name
-        Value: Private
+        Value: Private-RT1
 
-  PrivateRoute1:            # Private route table can access web via NAT (created below)
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Private-RT2
+
+  # Private route table can access web via NAT1
+  PrivateRoute1:
    Type: AWS::EC2::Route
    Properties:
-     RouteTableId: !Ref PrivateRouteTable
+     RouteTableId: !Ref PrivateRouteTable1
      DestinationCidrBlock: 0.0.0.0/0
-     # If we are using a NAT Instance, route traffic through the NAT Instance:
-     InstanceId: !Ref NATInstance
+     InstanceId: !Ref NATInstance1
+
+  # Private route table can access web via NAT2
+  PrivateRoute2:
+   Type: AWS::EC2::Route
+   Properties:
+     RouteTableId: !Ref PrivateRouteTable2
+     DestinationCidrBlock: 0.0.0.0/0
+     InstanceId: !Ref NATInstance2
 
 # Attach the public subnets to public route tables,
-  # and attach the private subnets to private route tables:
   PublicSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -208,56 +231,59 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnetB
       RouteTableId: !Ref PublicRouteTable
+
+  # Attach the private subnets to private route tables,
+
   PrivateSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetA
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref PrivateRouteTable1
   PrivateSubnetBRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetB
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref PrivateRouteTable2
 
-  # A NAT Instance will be used if the user selected Private subnets and EC2-based NAT.
-  NATInstance:
+  # Create NAT Instance1 in public subnet 1
+  NATInstance1:
     Type: AWS::EC2::Instance
-    DependsOn: PublicRoute1                           # Must have route to IGW established.
+    DependsOn: PublicRoute1
     Properties:
-      ImageId: !FindInMap [ AmazonLinuxAMI, !Ref "AWS::Region", AMI]  # lookup from AMI map
-      InstanceType: !FindInMap [ AmazonLinuxAMIInstanceType, !Ref "AWS::Region", AMIType]        # Any instance type is fine
+      ImageId: !FindInMap [ AmazonNATAMI, !Ref "AWS::Region", AMI]
+      InstanceType: !FindInMap [ AmazonLinuxAMIInstanceType, !Ref "AWS::Region", AMIType]
       KeyName: !Ref KeyPairName
       NetworkInterfaces:
       - DeviceIndex: '0'
-        SubnetId: !Ref PublicSubnetA                  # Any public subnet is fine
-        AssociatePublicIpAddress: true                # We will need a public IP address
+        SubnetId: !Ref PublicSubnetA
+        AssociatePublicIpAddress: true
         GroupSet:
-        - !Ref InstanceSecurityGroup             # Plug in the security group
-      SourceDestCheck: false  # NATs don't work if EC2 matches source with destinations.
+        - !Ref InstanceSecurityGroup
+      SourceDestCheck: false
       Tags:
       - Key: Name
-        Value: !Sub NAT-${AWS::StackName}
-      UserData:      #  This code is NAT code.  Last line signals completion:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          yum -y update
-          yum install -y aws-cfn-bootstrap
-          echo 1 > /proc/sys/net/ipv4/ip_forward
-          echo 0 > /proc/sys/net/ipv4/conf/eth0/send_redirects
-          /sbin/iptables -t nat -A POSTROUTING -o eth0 -s 0.0.0.0/0 -j MASQUERADE
-          /sbin/iptables-save > /etc/sysconfig/iptables
-          mkdir -p /etc/sysctl.d/
-          cat << NatConfFileMarker > /etc/sysctl.d/nat.conf
-          net.ipv4.ip_forward = 1
-          net.ipv4.conf.eth0.send_redirects = 0
-          NatConfFileMarker
-          /opt/aws/bin/cfn-signal -e 0 --resource NATInstance --stack ${AWS::StackName} --region ${AWS::Region}
-    # This NATInstance is only complete when you get 1 signal back within 5 minutes'.
-    CreationPolicy:
-      ResourceSignal:
-        Count: 1
-        Timeout: PT5M
+        Value: !Sub NAT1-${AWS::StackName}
 
+  # Create NAT Instance2 in public subnet 2
+  NATInstance2:
+    Type: AWS::EC2::Instance
+    DependsOn: PublicRoute1
+    Properties:
+      ImageId: !FindInMap [ AmazonNATAMI, !Ref "AWS::Region", AMI]
+      InstanceType: !FindInMap [ AmazonLinuxAMIInstanceType, !Ref "AWS::Region", AMIType]
+      KeyName: !Ref KeyPairName
+      NetworkInterfaces:
+      - DeviceIndex: '0'
+        SubnetId: !Ref PublicSubnetB
+        AssociatePublicIpAddress: true
+        GroupSet:
+        - !Ref InstanceSecurityGroup
+      SourceDestCheck: false
+      Tags:
+      - Key: Name
+        Value: !Sub NAT2-${AWS::StackName}
+
+  # Security Group for the EC2 instance
   InstanceSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     DependsOn: ALBSecurityGroup
@@ -286,6 +312,7 @@ Resources:
         - Key: Name
           Value: !Sub EC2-SG-${AWS::StackName}
 
+  # Security Group for the ALB
   ALBSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
@@ -304,6 +331,7 @@ Resources:
         - Key: Name
           Value: !Sub ALB-SG-${AWS::StackName}
 
+  # Target Group for the HTTP
   WebAppTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -321,6 +349,7 @@ Resources:
         - Key: Name
           Value: !Sub ALB-TG-${AWS::StackName}
 
+  # Create the ALB
   WebAppALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -336,7 +365,7 @@ Resources:
           Value: !Sub ALB-${AWS::StackName}
       Type: application
 
-
+  # Create the ALB listener
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -349,6 +378,7 @@ Resources:
       Port: '80'
       Protocol: HTTP
 
+  # ASG Lunch Configuration
   DeployAppLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -375,6 +405,7 @@ Resources:
             cd /var/www/html
             echo "<html><h1>Hello, Welcome To My Webpage Server! </h1></html>" > index.html
 
+  # Auto Scaling Group
   DeployAppASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -394,3 +425,21 @@ Resources:
     UpdatePolicy:
       AutoScalingReplacingUpdate:
         WillReplace: True
+
+  # S3 Gateway Endpoint
+  EndpointS3:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument: '{
+        "Statement":[{
+            "Effect":"Allow",
+            "Principal": "*",
+            "Action":["*"],
+            "Resource":["*"]
+        }]
+      }'
+      RouteTableIds:
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref VPC
