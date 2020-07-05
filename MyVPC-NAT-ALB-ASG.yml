@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-# This CloudFormation template deploys a VPC, with the following:
+# This CloudFormation template deploys a basic VPC, with the following:
 # 2 x Public Subnets in 2 AZ
 # 2 x Private Subnets in 2 AZ
 # 1 x NAT instance in PublicSubnet1
@@ -8,6 +8,7 @@ AWSTemplateFormatVersion: 2010-09-09
 # 1 x ASG
 # 2 x EC2 instance in 2 Private Subnet in the ASG, 1 EC2 per Private Subnet
 # 1 x S3 Gateway Endpoints, associate Private RT1 and Private RT2
+# Role for S3 Full Access
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -79,7 +80,7 @@ Mappings:
       AMI: ami-0615132a0f36d24f4    # Singapore
     ap-northeast-1:
       AMI: ami-0a1c2ec61571737db    # Tokyo
-  
+
 
   # This is mapping for the instance type. Please check before the deployment
   AmazonLinuxAMIInstanceType:
@@ -87,7 +88,7 @@ Mappings:
       AMIType: t2.micro    # Singapore
     ap-northeast-1:
       AMIType: t2.micro    # Tokyo
-   
+
 
   # This is the NAT AMI. Please check before the deployment
   AmazonNATAMI:
@@ -95,7 +96,8 @@ Mappings:
       AMI: ami-0003ce8d47722ef67    # Singapore
     ap-northeast-1:
       AMI: ami-00d29e4cb217ae06b    # Tokyo
-   
+
+
 
 
 Resources:
@@ -377,12 +379,15 @@ Resources:
   # ASG Lunch Configuration
   DeployAppLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn: FullAccessS3BucketsInstanceProfile
     Properties:
       ImageId: !FindInMap [ AmazonLinuxAMI, !Ref "AWS::Region", AMI]
       InstanceType: !FindInMap [ AmazonLinuxAMIInstanceType, !Ref "AWS::Region", AMIType]
       KeyName: !Ref KeyPairName
       SecurityGroups:
         - !Ref InstanceSecurityGroup
+      IamInstanceProfile:
+        Ref: FullAccessS3BucketsInstanceProfile
       BlockDeviceMappings:
         -
           DeviceName: /dev/xvda
@@ -439,3 +444,42 @@ Resources:
         - !Ref PrivateRouteTable2
       ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
       VpcId: !Ref VPC
+
+
+
+  #  Full S3 Access Instance Profile
+  FullAccessS3BucketsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: FullAccessS3BucketsRole
+
+  #  Full S3 Access Policy
+  FullAccessS3BucketsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: FullAccessS3BucketsPolicy
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:*
+          Resource: "*"
+      Roles:
+      - Ref: FullAccessS3BucketsRole
+
+  #  Full S3 Access Role
+  FullAccessS3BucketsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
