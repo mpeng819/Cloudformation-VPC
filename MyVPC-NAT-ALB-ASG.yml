@@ -1,5 +1,11 @@
 AWSTemplateFormatVersion: 2010-09-09
-# This CloudFormation template deploys a basic VPC / Network.
+# This CloudFormation template deploys a basic VPC, with the following:
+# 2 Public Subnets in 2 AZ
+# 2 Private Subnets in 2 AZ
+# 1 NAT instance in PublicSubnet1
+# 1 public facing Application Load Balancer
+# 1 1 ASG
+# 2 EC2 instance in 2 Private Subnet in the ASG, 1 EC2 each Private Subnet
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -13,6 +19,7 @@ Metadata:
       - PrivateSubnet1CIDR
       - PrivateSubnet2CIDR
       - KeyPairName
+
 
     ParameterLabels:
       VPCCIDR:
@@ -30,31 +37,31 @@ Parameters:
   VPCCIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
-    Default: 10.1.0.0/16
+    Default: 10.10.0.0/16
     Description: CIDR Block for the VPC
     Type: String
   PublicSubnet1CIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
-    Default: 10.1.1.0/24
+    Default: 10.10.1.0/24
     Description: CIDR Block for the public DMZ subnet 1 located in Availability Zone 1
     Type: String
   PublicSubnet2CIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
-    Default: 10.1.2.0/24
+    Default: 10.10.2.0/24
     Description: CIDR Block for the public DMZ subnet 2 located in Availability Zone 2
     Type: String
   PrivateSubnet1CIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
-    Default: 10.1.10.0/24
+    Default: 10.10.11.0/24
     Description: CIDR block for private subnet 1 located in Availability Zone 1
     Type: String
   PrivateSubnet2CIDR:
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
-    Default: 10.1.11.0/24
+    Default: 10.10.12.0/24
     Description: CIDR block for private subnet 2 located in Availability Zone 2
     Type: String
   KeyPairName:
@@ -62,17 +69,18 @@ Parameters:
     Type: "AWS::EC2::KeyPair::KeyName"
     ConstraintDescription: must be a valid Key Pair
 
+
 Mappings:
  #  This is the Amazon Linux 2 AMI.  Adjust these values as needed, they can change a few times per year:
   AmazonLinuxAMI:
     ap-southeast-1:
-      AMI: ami-0ec225b5e01ccb706    # Singapore
+      AMI: ami-0615132a0f36d24f4    # Singapore
     ap-east-1:
-      AMI: ami-dd7731ac    # Hongkong
+      AMI: ami-49bbfa38    # Hongkong
     ap-northeast-1:
-      AMI: ami-0f310fced6141e627    # Tokyo
+      AMI: ami-0a1c2ec61571737db    # Tokyo
     ap-northeast-2:
-      AMI: ami-01288945bd24ed49a    # Seoul
+      AMI: ami-01af223aa7f274198    # Seoul
 
   AmazonLinuxAMIInstanceType:
     ap-southeast-1:
@@ -252,6 +260,7 @@ Resources:
 
   InstanceSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
+    DependsOn: ALBSecurityGroup
     Properties:
       GroupDescription: Enable SSH, HTTP and ICMP
       VpcId: !Ref VPC
@@ -263,6 +272,11 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
+          CidrIp: 0.0.0.0/0
+#          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: 'tcp'
+          FromPort: '443'
+          ToPort: '443'
           CidrIp: 0.0.0.0/0
         - IpProtocol: icmp
           FromPort: -1
