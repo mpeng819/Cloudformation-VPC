@@ -9,3 +9,4 @@
 # 2 x EC2 instance in 2 Private Subnet in the ASG, 1 EC2 per Private Subnet
 # 1 x S3 Gateway Endpoints, associate Private RT1 and Private RT2
 # Role for S3 Full Access
+# Output: the ALB's DNS Name
