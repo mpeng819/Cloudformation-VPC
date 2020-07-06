@@ -9,6 +9,7 @@ AWSTemplateFormatVersion: 2010-09-09
 # 2 x EC2 instance in 2 Private Subnet in the ASG, 1 EC2 per Private Subnet
 # 1 x S3 Gateway Endpoints, associate Private RT1 and Private RT2
 # Role for S3 Full Access
+# Output: ALB's DNS name
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -483,3 +484,9 @@ Resources:
           Action:
           - sts:AssumeRole
       Path: "/"
+      
+# Get the ALB DNS name as the Output
+Outputs:
+  WebAppALB:
+    Description: The DNSName of the application load balancer
+    Value: !GetAtt WebAppALB.DNSName
